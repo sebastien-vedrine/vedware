@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
                                QVBoxLayout, QWidget)
 
 APP_NAME = "Vedware"
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 SELF_REPO = "sebastien-vedrine/Vedware"
 SELF_ID = SELF_REPO.lower()
 # Added automatically on first launch. Edit to taste.
@@ -58,6 +58,7 @@ PORTABLE_DIR = DATA_DIR / "apps"
 
 HEARTBEAT_MS = 10 * 60 * 1000          # how often we ask "is a check due?"
 REMIND_AFTER_S = 24 * 3600             # re-notify an ignored update once a day
+RECHECK_ON_OPEN_S = 5 * 60             # reopening the window re-checks if the last check is older
 
 
 def resource_path(name: str) -> Path:
@@ -1047,6 +1048,7 @@ class MainWindow(QMainWindow):
         b.install_failed.connect(self.on_install_failed)
         b.activate.connect(self.show_window)
 
+        self.refresh_detected()                         # don't show stale versions from the last session
         self.rebuild_cards()
         self.heartbeat = QTimer(self, interval=HEARTBEAT_MS, timeout=self.maybe_check)
         self.heartbeat.start()
@@ -1155,6 +1157,12 @@ class MainWindow(QMainWindow):
                 return letter_pixmap(app["name"] or "?", 48, "#94a3b8")
             self._avatars[key] = rounded(pm, 48)
         return self._avatars[key]
+
+    def refresh_detected(self):
+        """Re-read Apps & features (local, fast): picks up updates made outside Vedware."""
+        reg = registry_entries()
+        for a in self.cfg["apps"]:
+            a["detected"] = detect_installed(a, reg)
 
     def updates(self) -> list:
         return [a for a in self.cfg["apps"] if self.state(a)["has_update"]]
@@ -1571,9 +1579,15 @@ class MainWindow(QMainWindow):
 
     # ---------- window / tray
     def show_window(self):
+        reopened = not self.isVisible() or self.isMinimized()
         self.showNormal()
         self.raise_()
         self.activateWindow()
+        if reopened:                                    # back from the tray: show fresh state
+            self.refresh_detected()
+            self.rebuild_cards()
+            if now_ts() - (self.cfg.get("last_check") or 0) >= RECHECK_ON_OPEN_S:
+                self.start_check()
 
     def closeEvent(self, e):
         if self.quitting or not self.tray:
