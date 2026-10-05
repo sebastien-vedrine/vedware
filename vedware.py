@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
                                QVBoxLayout, QWidget)
 
 APP_NAME = "Vedware"
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 SELF_REPO = "sebastien-vedrine/Vedware"
 SELF_ID = SELF_REPO.lower()
 # Added automatically on first launch. Edit to taste.
