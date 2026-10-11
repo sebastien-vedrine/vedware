@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
                                QVBoxLayout, QWidget)
 
 APP_NAME = "Vedware"
-__version__ = "1.1.2"
+__version__ = "1.1.3"
 SELF_REPO = "sebastien-vedrine/Vedware"
 SELF_ID = SELF_REPO.lower()
 # Added automatically on first launch. Edit to taste.
@@ -146,6 +146,8 @@ STRINGS = {
     "err_bad_checksum": ("The download is corrupted (checksum mismatch)",
                          "Le fichier téléchargé est corrompu (somme de contrôle incorrecte)"),
     "err_cancelled": ("Installation cancelled", "Installation annulée"),
+    "err_in_use": ("The app is running — close it and try again",
+                   "Le logiciel est ouvert — fermez-le puis réessayez"),
     "err_exit_code": ("The installer stopped with code {c}", "L'installateur s'est arrêté avec le code {c}"),
     "err_title": ("Vedware", "Vedware"),
     "check_failed": ("Last check failed: {e}", "Échec de la dernière vérification : {e}"),
@@ -410,7 +412,12 @@ def download_file(asset, dest: Path, token, progress_cb):
     if digest.startswith("sha256:") and h.hexdigest() != digest[7:].lower():
         tmp.unlink(missing_ok=True)
         raise GitHubError("bad_checksum")
-    os.replace(tmp, dest)
+    try:
+        os.replace(tmp, dest)
+    except PermissionError:                        # the previous download is still running
+        dest = dest.parent / str(int(time.time() * 1000)) / dest.name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(tmp, dest)
     return dest
 
 
@@ -1405,21 +1412,34 @@ class MainWindow(QMainWindow):
         def work():
             try:
                 dest = DOWNLOAD_DIR / safe_name(app_id.replace("/", "__")) / asset["name"]
-                download_file(asset, dest, token, lambda p: self.bridge.progress.emit(app_id, p))
+                dest = download_file(asset, dest, token, lambda p: self.bridge.progress.emit(app_id, p))
                 self.bridge.phase.emit(app_id, "install")
                 result = {"tag": rel["tag_name"], "kind": "installer"}
+                folder = PORTABLE_DIR / safe_name(snapshot["repo"])
                 if dest.suffix.lower() == ".zip":
-                    folder = PORTABLE_DIR / safe_name(snapshot["repo"])
                     shutil.rmtree(folder, ignore_errors=True)
-                    with zipfile.ZipFile(dest) as z:
-                        z.extractall(folder)
+                    try:
+                        with zipfile.ZipFile(dest) as z:
+                            z.extractall(folder)
+                    except PermissionError:
+                        raise RuntimeError("in_use") from None
                     result.update(kind="zip", folder=str(folder))
                 elif app_id != SELF_ID and installer_kind(dest) == "portable":
-                    folder = PORTABLE_DIR / safe_name(snapshot["repo"])
-                    shutil.rmtree(folder, ignore_errors=True)
                     folder.mkdir(parents=True, exist_ok=True)
                     exe = folder / dest.name
-                    shutil.copy2(dest, exe)
+                    part = exe.with_name(exe.name + ".part")
+                    shutil.copy2(dest, part)
+                    try:
+                        os.replace(part, exe)
+                    except PermissionError:
+                        part.unlink(missing_ok=True)
+                        raise RuntimeError("in_use") from None
+                    for old in folder.glob("*.exe"):  # earlier versions with another file name
+                        if old != exe:
+                            try:
+                                old.unlink()
+                            except OSError:
+                                pass
                     result.update(kind="portable", folder=str(folder), exe=str(exe))
                 elif app_id == SELF_ID:
                     launch_detached(dest, SILENT_ARGS["inno"] if silent else "")

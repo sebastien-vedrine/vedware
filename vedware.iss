@@ -3,7 +3,7 @@
 ; Per-user install: no admin rights, no questions — double-click and it's done.
 
 #ifndef AppVersion
-  #define AppVersion "1.1.2"
+  #define AppVersion "1.1.3"
 #endif
 
 [Setup]
