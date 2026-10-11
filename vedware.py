@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
                                QVBoxLayout, QWidget)
 
 APP_NAME = "Vedware"
-__version__ = "1.1.1"
+__version__ = "1.1.2"
 SELF_REPO = "sebastien-vedrine/Vedware"
 SELF_ID = SELF_REPO.lower()
 # Added automatically on first launch. Edit to taste.
@@ -494,6 +494,8 @@ def installer_kind(path: Path) -> str:
     for kind, needles in marks.items():
         if any(n in head for n in needles):
             return kind
+    if b"_MEIPASS" in head or b"PyInstaller" in head:
+        return "portable"                          # the app itself, not an installer
     return "unknown"
 
 
@@ -1412,6 +1414,13 @@ class MainWindow(QMainWindow):
                     with zipfile.ZipFile(dest) as z:
                         z.extractall(folder)
                     result.update(kind="zip", folder=str(folder))
+                elif app_id != SELF_ID and installer_kind(dest) == "portable":
+                    folder = PORTABLE_DIR / safe_name(snapshot["repo"])
+                    shutil.rmtree(folder, ignore_errors=True)
+                    folder.mkdir(parents=True, exist_ok=True)
+                    exe = folder / dest.name
+                    shutil.copy2(dest, exe)
+                    result.update(kind="portable", folder=str(folder), exe=str(exe))
                 elif app_id == SELF_ID:
                     launch_detached(dest, SILENT_ARGS["inno"] if silent else "")
                     result["kind"] = "self"
@@ -1457,10 +1466,13 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(1500, self.quit_app)
             return
         ok = True
-        if res["kind"] == "zip":
+        if res["kind"] in ("zip", "portable"):
             app["installed_version"] = res["tag"]
             if not silent:
-                open_path(Path(res["folder"]))
+                if res["kind"] == "portable":
+                    launch_detached(Path(res["exe"]))
+                else:
+                    open_path(Path(res["folder"]))
         else:
             app["detected"] = res.get("detected")
             code = res.get("exit")
